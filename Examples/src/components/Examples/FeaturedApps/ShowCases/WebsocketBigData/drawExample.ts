@@ -2,6 +2,8 @@ import * as socketIOClient from "socket.io-client";
 import { MouseWheelZoomModifier } from "scichart/Charting/ChartModifiers/MouseWheelZoomModifier";
 import { ZoomExtentsModifier } from "scichart/Charting/ChartModifiers/ZoomExtentsModifier";
 import { ZoomPanModifier } from "scichart/Charting/ChartModifiers/ZoomPanModifier";
+import { ELegendOrientation, ELegendPlacement } from "scichart/Charting/Visuals/Legend/SciChartLegendBase";
+import { LegendModifier } from "scichart/Charting/ChartModifiers/LegendModifier";
 import { LayoutManager } from "scichart/Charting/LayoutManager/LayoutManager";
 import { RightAlignedOuterVerticallyStackedAxisLayoutStrategy } from "scichart/Charting/LayoutManager/RightAlignedOuterVerticallyStackedAxisLayoutStrategy";
 import { BaseDataSeries, IBaseDataSeriesOptions } from "scichart/Charting/Model/BaseDataSeries";
@@ -35,6 +37,9 @@ import { ENumericFormat } from "scichart/types/NumericFormat";
 import { ESeriesType } from "scichart/types/SeriesType";
 import { TSciChart } from "scichart/types/TSciChart";
 import { appTheme } from "../../../theme";
+import { BoxAnnotation } from "scichart";
+import { EHorizontalAnchorPoint, EVerticalAnchorPoint } from "scichart/types/AnchorPoint";
+import { ECoordinateMode } from "scichart/Charting/Visuals/Annotations/AnnotationBase";
 
 export type TMessage = {
     title: string;
@@ -47,6 +52,9 @@ export interface ISettings {
     pointsPerUpdate?: number;
     sendEvery?: number;
     initialPoints?: number;
+    modelType?: string;
+    productId?: number;
+    fMode?: number;
 }
 
 export const divElementId = "chart";
@@ -112,7 +120,8 @@ const dsOptions: IBaseDataSeriesOptions = {
 
 const createRenderableSeries = (
     wasmContext: TSciChart,
-    seriesType: ESeriesType
+    seriesType: ESeriesType,
+    dataStreamName: string
 ): { dataSeries: BaseDataSeries; rendSeries: BaseRenderableSeries } => {
     if (seriesType === ESeriesType.LineSeries) {
         const dataSeries: XyDataSeries = new XyDataSeries(wasmContext, dsOptions);
@@ -137,6 +146,7 @@ const createRenderableSeries = (
         return { dataSeries, rendSeries };
     } else if (seriesType === ESeriesType.ColumnSeries) {
         const dataSeries: XyDataSeries = new XyDataSeries(wasmContext, dsOptions);
+        dataSeries.dataSeriesName = dataStreamName;
         const rendSeries: FastColumnRenderableSeries = new FastColumnRenderableSeries(wasmContext, {
             fill: AUTO_COLOR,
             stroke: AUTO_COLOR,
@@ -311,11 +321,14 @@ const axisOptions: INumericAxisOptions = {
 };
 
 export const drawExample = async (updateMessages: (newMessages: TMessage[]) => void, seriesType: ESeriesType) => {
-    let seriesCount = 10;
+    let seriesCount = 4;
     let pointsOnChart = 1000;
     let pointsPerUpdate = 100;
     let sendEvery = 30;
     let initialPoints: number = 0;
+    let modelType = 'gear';
+    let productId = 15;
+    let fMode = 0;
 
     const { wasmContext, sciChartSurface } = await SciChartSurface.create(divElementId, { theme: appTheme.SciChartJsTheme });
     const xAxis = new NumericAxis(wasmContext, axisOptions);
@@ -334,13 +347,53 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         dataSeriesType = EDataSeriesType.XyText;
     }
 
-    const initChart = () => {
+    // get complementary color for hight contrast
+    function getCoColor(colorString: string) { // no alpha ex) "#ff00ff"
+        const a = parseInt(colorString.slice(1,6), 16);
+        const coColorStr = "#" + (0xffffff ^ a).toString(16).padStart(6, '0');
+        return coColorStr;
+    }
+
+    const getGearDataStreamNames = () => {
+        const names = [
+            "Vibration",
+            "Carrier RPM",
+            "Sun gear RPM",
+            "Fault stage"
+        ] as const;
+
+        return names;
+    }
+
+    const getPumpDataStreamNames = () => {
+        const names = [
+            "Pressure",
+            "Pump Flowrate",
+            "Actuator Input Signal",
+
+            "Swash Plate Angle",
+            "Pump Internal Flowrate",
+            "Swash Plate Angle",
+            "Spring Displacement",
+            "Pump Inlet Pressue"
+        ] as const;
+
+        return names;
+    }
+
+    const resetChart = () => {
         sciChartSurface.renderableSeries.asArray().forEach(rs => rs.delete());
         sciChartSurface.renderableSeries.clear();
         sciChartSurface.chartModifiers.asArray().forEach(cm => cm.delete());
         sciChartSurface.chartModifiers.clear();
         sciChartSurface.yAxes.asArray().forEach(ya => ya.delete());
         sciChartSurface.yAxes.clear();
+        sciChartSurface.annotations.asArray().forEach(ann => ann.delete());
+        sciChartSurface.annotations.clear();
+    }
+    const initChart = () => {
+        resetChart();
+
         sciChartSurface.layoutManager = new LayoutManager();
         yAxis = new NumericAxis(wasmContext, { ...axisOptions });
         sciChartSurface.yAxes.add(yAxis);
@@ -348,8 +401,9 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         let stackedCollection: IRenderableSeries;
         let xValues: number[];
         const positive = [ESeriesType.StackedColumnSeries, ESeriesType.StackedMountainSeries].includes(seriesType);
+        let dataStreamName = getGearDataStreamNames();
         for (let i = 0; i < seriesCount; i++) {
-            const { dataSeries, rendSeries } = createRenderableSeries(wasmContext, seriesType);
+            const { dataSeries, rendSeries } = createRenderableSeries(wasmContext, seriesType, dataStreamName[i]);
             dataSeriesArray[i] = dataSeries;
             if (seriesType === ESeriesType.StackedColumnSeries) {
                 if (i === 0) {
@@ -371,16 +425,35 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
                     sciChartSurface.layoutManager.rightOuterAxesLayoutStrategy =
                         new RightAlignedOuterVerticallyStackedAxisLayoutStrategy();
                     yAxis.id = "0";
+                    yAxis.axisBorder.borderTop = 50;
+                    yAxis.axisBorder.borderBottom = 50;
                 } else {
-                    sciChartSurface.yAxes.add(
-                        new NumericAxis(wasmContext, {
-                            id: i.toString(),
-                            ...axisOptions
-                        })
-                    );
+                    const yAxis = new NumericAxis(wasmContext, {
+                        id: i.toString(),
+                        ...axisOptions
+                    });
+                    sciChartSurface.yAxes.add(yAxis);
+                    yAxis.axisBorder.borderTop = 50;
+                    yAxis.axisBorder.borderBottom = 50;
                 }
                 rendSeries.yAxisId = i.toString();
                 sciChartSurface.renderableSeries.add(rendSeries);
+
+                // Add box annotiation
+                const boxAnnotation = new BoxAnnotation({
+                    stroke: appTheme.VividSkyBlue,
+                    strokeThickness: 1,
+                    fill: appTheme.VividSkyBlue + "33",
+                    xCoordinateMode: ECoordinateMode.DataValue,
+                    x1: 3000,
+                    x2: 6000,
+                    yCoordinateMode: ECoordinateMode.DataValue,
+                    y1: 0,
+                    y2: 1,
+                    isEditable: true
+                });
+                boxAnnotation.yAxisId = rendSeries.yAxisId;
+                sciChartSurface.annotations.add(boxAnnotation);
             } else {
                 sciChartSurface.renderableSeries.add(rendSeries);
             }
@@ -392,6 +465,20 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
             prePopulateData(dataSeries, dataSeriesType, xValues, positive);
             sciChartSurface.zoomExtents(0);
         }
+
+    
+
+        // add the legend modifier and show legend in the top left
+        const legendModifier = new LegendModifier({
+            showLegend: true,
+            placement: ELegendPlacement.TopLeft,
+            orientation: ELegendOrientation.Vertical,
+            showCheckboxes: true,
+            showSeriesMarkers: true
+        });
+
+        sciChartSurface.chartModifiers.add(legendModifier);
+
         return positive;
     };
 
@@ -401,6 +488,7 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
     let loadStart = 0;
 
     const loadData = (data: { x: number[]; ys: number[][]; sendTime: number }) => {
+        // dropping sendTime.
         loadStart = new Date().getTime();
         for (let i = 0; i < seriesCount; i++) {
             appendData(dataSeriesArray[i], dataSeriesType, i, data.x, data.ys, pointsOnChart, pointsPerUpdate);
@@ -408,9 +496,32 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         sciChartSurface.zoomExtents(0);
     };
 
+    sciChartSurface.preRender.subscribe(() => {
+        console.log("on preRender: ");
+        // Adjust box height
+        if( sciChartSurface.annotations.size() > 0) {
+            for (let i=0; i < sciChartSurface.annotations.size(); i++) {
+                const boxAnnotation = sciChartSurface.annotations.get(i) as BoxAnnotation;
+                const yRange = dataSeriesArray[i].getWindowedYRange(xAxis.visibleRange,false);
+                boxAnnotation.y1 = yRange.min;
+                boxAnnotation.y2 = yRange.max;
+                // FIXME: read fMode and adjust box width
+                boxAnnotation.x1 = 4000 + 1000*(i+2);
+                boxAnnotation.x2 = boxAnnotation.x1 + 100;
+
+                const strokeColor = (sciChartSurface.renderableSeries.get(i) as FastColumnRenderableSeries).stroke;
+                boxAnnotation.fill = getCoColor(strokeColor) + '88';
+            }
+            console.log("on preRender: moving annotation");
+        }
+
+    });
+
     sciChartSurface.rendered.subscribe(() => {
         if (!isRunning || loadStart === 0) return;
-        const reDrawTime = new Date().getTime() - loadStart;
+        let date = new Date();
+        const reDrawTime = date.getTime() - loadStart;
+        date = null;
         avgRenderTime = (avgRenderTime * loadCount + reDrawTime) / (loadCount + 1);
         newMessages.push({
             title: `Average Render Time `,
@@ -459,6 +570,7 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
                 console.log("local");
             }
             socket.on("data", (message: any) => {
+                console.log("socket.on() :data : " + message);
                 dataBuffer.push(message);
             });
             socket.on("finished", () => {
@@ -502,17 +614,21 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
                 series = Array.from(Array(seriesCount * 2)).fill(0);
             }
         }
-        socket.emit("getData", { series, startX: index + 1, pointsPerUpdate, sendEvery, positive, scale: 10 });
+        console.log("socket.emit>getData(): startX = %d", (index+1) );
+        socket.emit("getData", { series, startX: index + 1, pointsPerUpdate, sendEvery, positive, scale: 10, modelType, productId, fMode });
         isRunning = true;
         loadFromBuffer();
     };
 
     const settings = {
-        seriesCount: 10,
+        seriesCount: 4,
         pointsOnChart: 5000,
         pointsPerUpdate: 10,
         sendEvery: 100,
-        initialPoints: 5000
+        initialPoints: 5000,
+        modelType: "gear",
+        productId: 15,
+        fMode: 0
     };
 
     const updateSettings = (newValues: ISettings) => {

@@ -81,7 +81,7 @@ export default function App() {
         //     .then(r => r.text())
         //     .then(key => SciChartSurface.setRuntimeLicenseKey(key));
         SciChartSurface.setRuntimeLicenseKey(
-            "Ba+CO9zu9dtOPXWHd4ZSf62jLWJ2mWWzfLjGE/WG26CwypCj4VQ4UWY0ny44WPEyiEAvbu10cjdmLtCmTpIWsOdyga+mGQ66j3WlpyGfsZxrlWtexjJKNTed2LiDhsrQMwYm5MJEmKW0Vu69k/G51q+LEO2Pn3IIMoLCZvWHffo0ngugfC5ECFtx1laMNvPGmTlguswqCp/VIsBeKNGDadt2Bq9DPpCAh53+AQBDXhtW5GSu/KocQzTHc7cmNGEaumRohQteEfPonqNWDEhbQj+BS65c6Ha13Vi23XRtthKSVgjhicoyk50MU3G46Xvxnt5FRoGJ2y/f8up1ASXL4jzcZgY2Sy+d5FblwksjoMR+AB0DEwOwWK0Gj+v6BeH6T3pl4KYXjlVTn+suhQKNSUov2GXhZQWwZxdvaWNrcuZuNpQECZ7o7ffW5Qggh80euz4bFT8ARySoTPJCwcuIL2L4tJ/zbHqwB1wBmPQf2wKLMbdr1ZrXl6E53xBClavieC+zfuu11gcCYkCd2g3icvuzKnQ/mw6/Uu6wJOE27nv8dPR4neKanseE2/0tiL0hQgjGi6Q7ltgHK8dKlqBVbkjCiQ0X1dvEPdT+FopQu6RAMynoodtgJGXXMOxH4gFmO2J+9Cn0QATCRIeezLR7uyU9Eo0aYh7fDyfe7tZK0Gic/rrvECGby5OAqvJLfaKSO4JzKyAic/GqzD+hv9BIOTL3zbFH7TggaEfJXRXdsB1expogeN+AbL6YXX7WIIDuSYuG0w=="
+            "jfSxdnk34WloNyMt+qY0yhrB38zDm+awSDoCsWcflED/o+YAvdZJo9YVIHP80Y2QYiaDbcld7TIwAMkaPchHnPiX8jyHJ/bPNv58I7fTawRUbDfkastBk8ViSUzU+1uc6w+R6amhPCDlURXHA3ScgfPlM0e190MXbCowC3rxq8HlGzbE846FOKSUripZcSWLK9ic4rxyS/xeYq0yhwZ+UW4q6ffmhXR7VMtINelC6tcqH6lrm4oEQd5i0nj2kPqmTz+C5Ckw/OBj6K2nqLsEiBvsdiAS1qDJgK5ydmIGWKOk/xxwZVBtVEWsoi90tFAGa7czs1CnMDEvfVoAXMp4BW4QKXodOoOnnqlL+p7l6x714zSvqD9Td5VZk1dFtCY4ek7rQeWbaEqvRs+pWzjY+RLwBpKxs3FGzi7HpNteaXZQ8Avr9jTsH5nPMjNylnbIA7VWqWXrRZ8wP2KmFO+fgKk1HehqnhqsLhj54dq50ze7fua7XsYRjkzbPMUp/qXXHI5iCfENJagCifVlKCH2nTxhdH7AiHZDQKp2eem6FlL7b+goyrviKp5mjBbo"
         );
 
         SciChartDefaults.useSharedCache = true;

@@ -29,19 +29,24 @@ const useStyles = makeStyles(theme => ({
         color: appTheme.ForegroundColor
     },
     chartArea: {
-        flex: 1,
+        // flex: 1,
+        flex: "auto",
     }
 }));
 
 export default function RealtimeBigDataShowcase() {
-    const [seriesType, setSeriesType] = React.useState<ESeriesType>(ESeriesType.LineSeries);
+    // const [seriesType, setSeriesType] = React.useState<ESeriesType>(ESeriesType.LineSeries);
+    const [seriesType, setSeriesType] = React.useState<ESeriesType>(ESeriesType.ColumnSeries);
     const [isDirty, setIsDirty] = React.useState<boolean>(false);
     const [settings, setSettings] = React.useState<ISettings>({
-        seriesCount: 10,
+        seriesCount: 4,
         pointsOnChart: 4, // 10000
-        pointsPerUpdate: 1, // 10
+        pointsPerUpdate: 2, // 10
         sendEvery: 100,
-        initialPoints: 4 // 10000
+        initialPoints: 4, // 10000
+        modelType: "gear",
+        productId: 15,
+        fMode: 0
     });
     const [maxSettings, setMaxSettings] = React.useState<ISettings>({
         seriesCount: 100,
@@ -73,6 +78,13 @@ export default function RealtimeBigDataShowcase() {
         setSeriesType(e.target.value);
     };
 
+    const changeDataStream = (modelType: string, productId: number, fMode: number) => {
+        controls?.stopStreaming();
+        setSettings({...settings, modelType, productId, fMode});
+        setIsDirty(false);
+        controls?.startStreaming();
+    }
+
     React.useEffect(() => {
         (async () => {
             const res = await drawExample((newMessages: TMessage[]) => {
@@ -85,11 +97,44 @@ export default function RealtimeBigDataShowcase() {
                 pointsOnChart: logScale(settings.pointsOnChart),
                 pointsPerUpdate: logScale(settings.pointsPerUpdate)
             });
+            
+            const messageHandler = (evt: MessageEvent): any => {
+                console.log(evt);
+                if ((evt.data.source as string).startsWith("react-devtools"))
+                    return;
+
+                const data = JSON.parse(evt.data);
+                console.log(data);
+
+                switch (data.command as string) {
+                    case "stop": // stop
+                        controls.stopStreaming();
+                        break;
+                    case "changeData": // change to gear chart
+                        switch (data.modelType as string) {
+                            case "gear":
+                            case "pump":
+                                changeDataStream(data.modelType, data.pid, data.fMode);
+                                break;
+                            default:
+                                break;
+                        }
+                        break;
+                    default:
+                }
+
+            }
+            window.addEventListener("message", messageHandler);
+            console.log("window.addEventListender(\"message\",...) is installed.");
+
             return () => {
                 controls.stopStreaming();
+                window.removeEventListener("message", messageHandler);
                 res.sciChartSurface?.delete();
             };
         })();
+        // set default value
+        setSeriesType(ESeriesType.ColumnSeries);
     }, [seriesType]);
 
     const handleSeriesCount = (event: any, newValue: any) => {
@@ -158,7 +203,7 @@ export default function RealtimeBigDataShowcase() {
     return (
         <div className={classes.ChartWrapper}>
             <div className={localClasses.flexOuterContainer}>
-                <div id={divElementId} className={localClasses.chartArea} style={{ flexBasis: 600, flexGrow: 1, flexShrink: 1 }} />
+                <div id={divElementId} className={localClasses.chartArea} style={{ flexBasis: 60, flexGrow: 1, flexShrink: 1 }} />
                 <div className={classes.notificationsBlock} style={{ margin: "10 10 0 10", color: appTheme.ForegroundColor, flexBasis: 100, flexGrow: 1, flexShrink: 1 }}>
                         <div>
                         <FormControl className={classes.formControl} >
@@ -177,13 +222,9 @@ export default function RealtimeBigDataShowcase() {
                                 id="chartType"
                                 value={seriesType}
                                 onChange={changeChart}
+                                defaultValue={ESeriesType.ColumnSeries}
                             >
-                                <FormControlLabel value={ESeriesType.LineSeries} control={<Radio />} label="Line Chart" />
                                 <FormControlLabel value={ESeriesType.ColumnSeries} control={<Radio />} label="Column Chart with Stacked Axes" />
-                                <FormControlLabel value={ESeriesType.StackedMountainSeries} control={<Radio />} label="Stacked Mountain Chart" />
-                                <FormControlLabel value={ESeriesType.BandSeries} control={<Radio />} label="Band Chart" />
-                                <FormControlLabel value={ESeriesType.ScatterSeries} control={<Radio />} label="Scatter Chart" />
-                                <FormControlLabel value={ESeriesType.CandlestickSeries} control={<Radio />} label="Candlestick Chart" />
                             </RadioGroup>
                         </FormControl>
                             <Typography variant="body1">Number of Series {settings.seriesCount}</Typography>
