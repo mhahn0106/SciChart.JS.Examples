@@ -35,16 +35,30 @@ import { XyScatterRenderableSeries } from "scichart/Charting/Visuals/RenderableS
 import { SciChartSurface } from "scichart/Charting/Visuals/SciChartSurface";
 import { ENumericFormat } from "scichart/types/NumericFormat";
 import { ESeriesType } from "scichart/types/SeriesType";
-import { TSciChart } from "scichart/types/TSciChart";
+import { SCRTDoubleVector, TSciChart } from "scichart/types/TSciChart";
 import { appTheme } from "../../../theme";
-import { BoxAnnotation } from "scichart";
+import { BoxAnnotation, EXyDirection } from "scichart";
 import { EHorizontalAnchorPoint, EVerticalAnchorPoint } from "scichart/types/AnchorPoint";
 import { ECoordinateMode } from "scichart/Charting/Visuals/Annotations/AnnotationBase";
+import { fail } from "assert";
+import { max } from "rxjs";
 
 export type TMessage = {
     title: string;
     detail: string;
 };
+
+export type TControls = {
+    startStreaming: () => void;
+    stopStreaming: () => void;
+    updateSettings: (newValues: ISettings) => void;
+};
+
+export type TRes = {
+    wasmContext: TSciChart;
+    sciChartSurface: SciChartSurface;
+    controls: TControls;
+}
 
 export interface ISettings {
     seriesCount?: number;
@@ -63,6 +77,15 @@ let loadCount: number = 0;
 let loadTimes: number[];
 let avgLoadTime: number = 0;
 let avgRenderTime: number = 0;
+let gWasmContext_: TSciChart = null;
+let gSciChartSurface_: SciChartSurface = null;
+
+// get complementary color for hight contrast
+function getCoColor(colorString: string) { // no alpha ex) "#ff00ff"
+    const a = parseInt(colorString.slice(1,6), 16);
+    const coColorStr = "#" + (0xffffff ^ a).toString(16).padStart(6, '0');
+    return coColorStr;
+}
 
 function GetRandomData(xValues: number[], positive: boolean) {
     let prevYValue = Math.random();
@@ -250,6 +273,148 @@ const prePopulateData = (
     }
 };
 
+function rescalingFailureData(dataSeries:BaseDataSeries, failures: number[]){
+    if (gWasmContext_ == null)
+        return null;
+
+    const minmax = gWasmContext_.NumberUtil.MinMax(dataSeries.getNativeYValues());
+    const absMax = Math.max(Math.abs(minmax.maxD), Math.abs(minmax.minD));
+    for (let i = 0; i < failures.length; i++) {
+        if ( failures[i] == 0 )
+            failures[i] = 0;
+        else
+            failures[i] = absMax;
+    }
+
+    return failures;
+}
+
+function addAnnotationBar(
+    rendSeries: BaseRenderableSeries,
+    startX: number,
+    endX: number
+){
+    // console.log("addAnnotionBar(sX: %d, eX: %d)", startX, endX);
+
+    if (startX >= endX) {
+        console.log("addAnnotionBar(sX: %d, eX: %d)", startX, endX);
+        return;
+    }
+
+    // Add box annotiation
+    const boxAnnotation = new BoxAnnotation({
+        stroke: appTheme.VividSkyBlue,
+        strokeThickness: 0,
+        fill: appTheme.VividSkyBlue + "33",
+        xCoordinateMode: ECoordinateMode.DataValue,
+        x1: 0,
+        x2: 0,
+        yCoordinateMode: ECoordinateMode.Relative,
+        y1: 0,
+        y2: 1,
+    });
+    boxAnnotation.x1 = startX;
+    boxAnnotation.x2 = endX;
+    boxAnnotation.yAxisId = rendSeries.yAxisId;
+
+    boxAnnotation.resizeDirections = EXyDirection.YDirection;
+    
+    // const useNativeYValues: boolean = false;
+    // if (useNativeYValues) {
+    //     const yRange = gWasmContext_.NumberUtil.MinMax(rendSeries.dataSeries.getNativeYValues());
+    //     boxAnnotation.y1 = yRange.minD;
+    //     boxAnnotation.y2 = yRange.maxD;
+
+    // } else {
+    //     const yRange = rendSeries.dataSeries.getWindowedYRange(rendSeries.xAxis.visibleRange,false,false);
+    //     boxAnnotation.y1 = yRange.min;
+    //     boxAnnotation.y2 = yRange.max;
+    // }
+    // boxAnnotation.yCoordinateMode = ECoordinateMode.DataValue;
+
+    const strokeColor = (rendSeries as FastColumnRenderableSeries).stroke;
+    boxAnnotation.fill = getCoColor(strokeColor) + '88';
+    boxAnnotation.stroke = boxAnnotation.fill;
+
+    console.log("Added AnnoBox():  -> %d, %d, %d, %d, %s", 
+        boxAnnotation.x1, boxAnnotation.x2, 
+        boxAnnotation.y1, boxAnnotation.y2,
+        boxAnnotation.yAxisId
+    );
+    if ( gSciChartSurface_ != null && gSciChartSurface_ != undefined)
+        gSciChartSurface_.annotations.add(boxAnnotation);
+
+}
+function deleteAnnotationBoxOutOfRange() {
+    const anns = gSciChartSurface_.annotations;
+    const count = anns.size();
+    const renderSeries = gSciChartSurface_.renderableSeries.get(0);
+    const xRange = renderSeries.dataSeries.getIndicesRange(renderSeries.xAxis.visibleRange);
+    const xMin = xRange.min;
+    const xMax = xRange.max;
+    for (let i = count-1; i >= 0; i--) {
+        const ann = anns.get(i);
+        if ( ann.x1 < xMin && ann.x2 < xMin) {
+            console.log("ab out of range: (%d, %d) -- (%d, %d)", ann.x1, ann.x2, xMin, xMax);
+            ann.delete();
+            anns.remove(ann);
+        }
+    }
+}
+
+function addAnnotionBars(
+    rendSeries: BaseRenderableSeries,
+    xValues: number[],
+    failures: number[]
+    ) {
+
+    // console.log("addAnnotionBars():" + rendSeries);
+    let startX: number = -1;
+    let endX: number = -1;
+    let foundStartX = false;
+    let foundEndX = false;
+    for (let i = 0; i < failures.length; i++) {
+        // seek first non-zero value
+        if (foundStartX == false) {
+            if (foundEndX == false) {
+                if (failures[i] > 0) {
+                    // found
+                    startX = xValues[i];
+                    foundStartX = true;
+                } else {
+                    // just skip
+                }
+            } else {
+                // impossible
+            }
+        } else {
+            if (foundEndX == false) {
+                if (failures[i] > 0) {
+                    endX = xValues[i];
+                } else {
+                    // found interval
+                    // console.log("Adding aB in normal mode:");
+                    addAnnotationBar(rendSeries, startX, endX);
+                    foundStartX = false;
+                    foundEndX = false;
+                }
+            } else {
+
+            }
+
+        }
+    }
+
+    // if box is not terminated yet
+    if (foundStartX == true && foundEndX == false) {
+        console.log("Adding whole ab..");
+        if (endX == -1) {
+            endX = xValues[failures.length-1];
+        }
+        addAnnotationBar(rendSeries, startX, endX);
+    }
+
+}
 const appendData = (
     dataSeries: BaseDataSeries,
     dataSeriesType: EDataSeriesType,
@@ -257,7 +422,9 @@ const appendData = (
     xValues: number[],
     yArray: number[][],
     pointsOnChart: number,
-    pointsPerUpdate: number
+    pointsPerUpdate: number,
+    dataSeriesCompanion?: BaseDataSeries,
+    failures?: number[]
 ) => {
     switch (dataSeriesType) {
         case EDataSeriesType.Xy:
@@ -266,6 +433,14 @@ const appendData = (
             if (xySeries.count() > pointsOnChart) {
                 xySeries.removeRange(0, pointsPerUpdate);
             }
+
+            // failures = rescalingFailureData(dataSeries, failures);
+            const xySeriesCompanion = dataSeriesCompanion as XyDataSeries;
+            xySeriesCompanion.appendRange(xValues, failures)
+            if (xySeriesCompanion.count() > pointsOnChart) {
+                xySeriesCompanion.removeRange(0, pointsPerUpdate);
+            }
+            
             break;
         case EDataSeriesType.Xyy:
             const xyySeries = dataSeries as XyyDataSeries;
@@ -331,11 +506,14 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
     let fMode = 0;
 
     const { wasmContext, sciChartSurface } = await SciChartSurface.create(divElementId, { theme: appTheme.SciChartJsTheme });
+    gWasmContext_ = wasmContext;
+    gSciChartSurface_ = sciChartSurface;
     const xAxis = new NumericAxis(wasmContext, axisOptions);
     sciChartSurface.xAxes.add(xAxis);
     let yAxis = new NumericAxis(wasmContext, { ...axisOptions });
     sciChartSurface.yAxes.add(yAxis);
     let dataSeriesArray: BaseDataSeries[];
+    let dataSeriesArrayCompanion: BaseDataSeries[];
     let dataSeriesType = EDataSeriesType.Xy;
     if (seriesType === ESeriesType.BubbleSeries) {
         dataSeriesType = EDataSeriesType.Xyz;
@@ -347,12 +525,7 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         dataSeriesType = EDataSeriesType.XyText;
     }
 
-    // get complementary color for hight contrast
-    function getCoColor(colorString: string) { // no alpha ex) "#ff00ff"
-        const a = parseInt(colorString.slice(1,6), 16);
-        const coColorStr = "#" + (0xffffff ^ a).toString(16).padStart(6, '0');
-        return coColorStr;
-    }
+
 
     const getGearDataStreamNames = () => {
         const names = [
@@ -381,6 +554,32 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         return names;
     }
 
+    const getDataStreamNames = () => {
+        if (modelType == 'pump')
+            return getPumpDataStreamNames();
+        return getGearDataStreamNames();
+    }
+
+    const changeDataStreamNames = () => {
+        if (dataSeriesArray == undefined || dataSeriesArray.length == 0 )
+            return;
+
+        const names = getDataStreamNames();
+
+        for (let i = 0; i < seriesCount; i++) {
+            if ( i == seriesCount - 1 ) { // fault case
+                if (modelType === 'pump') {
+                    dataSeriesArray[i].dataSeriesName = names[ i+fMode ];
+                }
+            } else
+                dataSeriesArray[i].dataSeriesName = names[i];
+
+
+            
+        }
+        
+    }
+
     const resetChart = () => {
         sciChartSurface.renderableSeries.asArray().forEach(rs => rs.delete());
         sciChartSurface.renderableSeries.clear();
@@ -398,15 +597,23 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         yAxis = new NumericAxis(wasmContext, { ...axisOptions });
         sciChartSurface.yAxes.add(yAxis);
         dataSeriesArray = new Array<BaseDataSeries>(seriesCount);
+        dataSeriesArrayCompanion = new Array<BaseDataSeries>(seriesCount);
         let stackedCollection: IRenderableSeries;
         let xValues: number[];
         const positive = [ESeriesType.StackedColumnSeries, ESeriesType.StackedMountainSeries].includes(seriesType);
-        let dataStreamName = getGearDataStreamNames();
+        let dataStreamName = getDataStreamNames();
         for (let i = 0; i < seriesCount; i++) {
             const { dataSeries, rendSeries } = createRenderableSeries(wasmContext, seriesType, dataStreamName[i]);
+            const companionData = createRenderableSeries(wasmContext, seriesType, "");
+            const dataSeriesCompanion = companionData.dataSeries;
+            const rendSeriesCompanion = companionData.rendSeries;
+            let strokeColor : string = (rendSeriesCompanion as FastColumnRenderableSeries).stroke.slice(3,9);
+            strokeColor = "#" + "55" + strokeColor;
+            (rendSeriesCompanion as FastColumnRenderableSeries).stroke = strokeColor;
             dataSeriesArray[i] = dataSeries;
+            dataSeriesArrayCompanion[i] = dataSeriesCompanion;
             if (seriesType === ESeriesType.StackedColumnSeries) {
-                if (i === 0) {
+                if (i === 0) { 
                     stackedCollection = new StackedColumnCollection(wasmContext, { dataPointWidth: 1 });
                     sciChartSurface.renderableSeries.add(stackedCollection);
                 }
@@ -438,22 +645,9 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
                 }
                 rendSeries.yAxisId = i.toString();
                 sciChartSurface.renderableSeries.add(rendSeries);
+                // rendSeriesCompanion.yAxisId = i.toString();
+                // sciChartSurface.renderableSeries.add(rendSeriesCompanion);
 
-                // Add box annotiation
-                const boxAnnotation = new BoxAnnotation({
-                    stroke: appTheme.VividSkyBlue,
-                    strokeThickness: 1,
-                    fill: appTheme.VividSkyBlue + "33",
-                    xCoordinateMode: ECoordinateMode.DataValue,
-                    x1: 3000,
-                    x2: 6000,
-                    yCoordinateMode: ECoordinateMode.DataValue,
-                    y1: 0,
-                    y2: 1,
-                    isEditable: true
-                });
-                boxAnnotation.yAxisId = rendSeries.yAxisId;
-                sciChartSurface.annotations.add(boxAnnotation);
             } else {
                 sciChartSurface.renderableSeries.add(rendSeries);
             }
@@ -482,38 +676,41 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         return positive;
     };
 
-    const dataBuffer: { x: number[]; ys: number[][]; sendTime: number }[] = [];
+    const dataBuffer: { x: number[]; ys: number[][];  sendTime: number; failures: number[]; }[] = [];
     let isRunning: boolean = false;
     const newMessages: TMessage[] = [];
     let loadStart = 0;
 
-    const loadData = (data: { x: number[]; ys: number[][]; sendTime: number }) => {
+    const loadData = (data: { x: number[]; ys: number[][]; sendTime: number; failures: number[] }) => {
         // dropping sendTime.
         loadStart = new Date().getTime();
         for (let i = 0; i < seriesCount; i++) {
-            appendData(dataSeriesArray[i], dataSeriesType, i, data.x, data.ys, pointsOnChart, pointsPerUpdate);
+            appendData(dataSeriesArray[i], dataSeriesType, i, data.x, data.ys, pointsOnChart, pointsPerUpdate, dataSeriesArrayCompanion[i], data.failures);
+            // console.log("Adding annotion bars on channel: %d", 2*i);
         }
+        addAnnotionBars((gSciChartSurface_.renderableSeries.get(0) as BaseRenderableSeries), data.x, data.failures);
+        // deleteAnnotationBoxOutOfRange();
         sciChartSurface.zoomExtents(0);
     };
 
     sciChartSurface.preRender.subscribe(() => {
-        console.log("on preRender: ");
-        // Adjust box height
-        if( sciChartSurface.annotations.size() > 0) {
-            for (let i=0; i < sciChartSurface.annotations.size(); i++) {
-                const boxAnnotation = sciChartSurface.annotations.get(i) as BoxAnnotation;
-                const yRange = dataSeriesArray[i].getWindowedYRange(xAxis.visibleRange,false);
-                boxAnnotation.y1 = yRange.min;
-                boxAnnotation.y2 = yRange.max;
-                // FIXME: read fMode and adjust box width
-                boxAnnotation.x1 = 4000 + 1000*(i+2);
-                boxAnnotation.x2 = boxAnnotation.x1 + 100;
+        // console.log("on preRender: ");
+        // // Adjust box height
+        // if( sciChartSurface.annotations.size() > 0) {
+        //     for (let i=0; i < sciChartSurface.annotations.size(); i++) {
+        //         const boxAnnotation = sciChartSurface.annotations.get(i) as BoxAnnotation;
+        //         const yRange = dataSeriesArray[i].getWindowedYRange(xAxis.visibleRange,false);
+        //         boxAnnotation.y1 = yRange.min;
+        //         boxAnnotation.y2 = yRange.max;
+        //         // FIXME: read fMode and adjust box width
+        //         boxAnnotation.x1 = 4000 + 1000*(i+2);
+        //         boxAnnotation.x2 = boxAnnotation.x1 + 100;
 
-                const strokeColor = (sciChartSurface.renderableSeries.get(i) as FastColumnRenderableSeries).stroke;
-                boxAnnotation.fill = getCoColor(strokeColor) + '88';
-            }
-            console.log("on preRender: moving annotation");
-        }
+        //         const strokeColor = (sciChartSurface.renderableSeries.get(i) as FastColumnRenderableSeries).stroke;
+        //         boxAnnotation.fill = getCoColor(strokeColor) + '88';
+        //     }
+        //     // console.log("on preRender: moving annotation");
+        // }
 
     });
 
@@ -540,14 +737,16 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
             const x: number[] = dataBuffer[0].x;
             const ys: number[][] = dataBuffer[0].ys;
             const sendTime = dataBuffer[0].sendTime;
+            const failures: number[] = dataBuffer[0].failures;
             for (let i = 1; i < dataBuffer.length; i++) {
                 const el = dataBuffer[i];
                 x.push(...el.x);
                 for (let y = 0; y < el.ys.length; y++) {
                     ys[y].push(...el.ys[y]);
                 }
+                failures.push(...el.failures);
             }
-            loadData({ x, ys, sendTime });
+            loadData({ x, ys, sendTime, failures });
             dataBuffer.length = 0;
         }
         if (isRunning) {
@@ -570,7 +769,7 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
                 console.log("local");
             }
             socket.on("data", (message: any) => {
-                console.log("socket.on() :data : " + message);
+                // console.log("socket.on() :data : " + message);
                 dataBuffer.push(message);
             });
             socket.on("finished", () => {
@@ -616,6 +815,8 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         }
         console.log("socket.emit>getData(): startX = %d", (index+1) );
         socket.emit("getData", { series, startX: index + 1, pointsPerUpdate, sendEvery, positive, scale: 10, modelType, productId, fMode });
+        console.log("drawExample.getData(__, %d, %d, %d, %d, %d, %s, %d, %d)", 
+            (index + 1), pointsPerUpdate, sendEvery, positive, 10, modelType, productId, fMode );
         isRunning = true;
         loadFromBuffer();
     };
@@ -633,6 +834,7 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
 
     const updateSettings = (newValues: ISettings) => {
         Object.assign(settings, newValues);
+        changeDataStreamNames();
     };
 
     // Buttons for chart
@@ -648,6 +850,9 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
         pointsOnChart = settings.pointsOnChart;
         pointsPerUpdate = settings.pointsPerUpdate;
         sendEvery = settings.sendEvery;
+        modelType = settings.modelType;
+        productId = settings.productId;
+        fMode = settings.fMode;
         const positive = initChart();
         initWebSocket(positive);
     };

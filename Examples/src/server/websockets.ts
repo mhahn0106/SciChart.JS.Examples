@@ -28,6 +28,7 @@ type _baseDataMessage = {
 type chartData = {
     x: number[];
     ys: number[][];
+    failures: number[];
 };
 
 async function fetchDataFromWAS(
@@ -57,6 +58,10 @@ async function fetchDataFromWAS(
     const _jsonObj = await response.json();
     const dataArr : _chartData[] = (_jsonObj as _baseDataMessage).dataList;
 
+    if (dataArr == null ||  dataArr == undefined) {
+        return null;
+    }
+
     const len_ = 4;
     // Temporary arry for fast insertion. Do not forget for delete.
     const chartVals : number[][] = new Array(len_);
@@ -80,6 +85,7 @@ async function fetchDataFromWAS(
 // return;
     const x: number[] = [];
     const ys: number[][] = new Array(len_);
+    const failures: number[] = []; // failure_mode
     let nextx = statusOffset;
     const pointsPerUpdate = dataPerReq;
     for (let i = 0; i < pointsPerUpdate; i++) { // data requested
@@ -92,12 +98,13 @@ async function fetchDataFromWAS(
             let nextY = chartVals[s][i]; // pickup next y data.
             ys[s].push(nextY); // store next y data
         }
+        failures.push((dataArr[i].failure_mode > 0 ) ? 1000 : 0);
     }
 
     console.log("----Got %d data from WAS-----", x.length);
     chartVals.length = 0;
 
-    const ret: chartData = {x, ys} as chartData;
+    const ret: chartData = {x, ys, failures} as chartData;
 
     return ret;
 }
@@ -122,8 +129,9 @@ function send_(socket:any, data:chartData)
 
     const x = data.x;
     const ys = data.ys;
+    const failures = data.failures;
     let date = new Date()
-    socket.emit("data", {x, ys, sendTime: date.getTime()});
+    socket.emit("data", {x, ys, failures, sendTime: date.getTime()});
     date = null;
 }
 const sendData = (
@@ -149,7 +157,7 @@ const sendData = (
     if (isDataFromWas) {
         fetchDataFromWAS(modelType, productId, nextx, pointsPerUpdate).then(value => send_(socket, value));
         nextx += pointsPerUpdate;
-    } else {
+    } else { // old code.
         const x: number[] = [];
         const ys: number[][] = new Array(series.length);
         for (let i = 0; i < pointsPerUpdate; i++) { // data requested

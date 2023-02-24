@@ -10,7 +10,7 @@ import AlertTitle from "@material-ui/lab/AlertTitle";
 import * as React from "react";
 import { ESeriesType } from "scichart/types/SeriesType";
 import { appTheme } from "../../../theme";
-import { divElementId, drawExample, ISettings, TMessage } from "./drawExample";
+import { divElementId, drawExample, ISettings, TMessage, TRes, TControls } from "./drawExample";
 
 const useStyles = makeStyles(theme => ({
     flexOuterContainer: {
@@ -35,6 +35,7 @@ const useStyles = makeStyles(theme => ({
 }));
 
 export default function RealtimeBigDataShowcase() {
+    let gRes: TRes;
     // const [seriesType, setSeriesType] = React.useState<ESeriesType>(ESeriesType.LineSeries);
     const [seriesType, setSeriesType] = React.useState<ESeriesType>(ESeriesType.ColumnSeries);
     const [isDirty, setIsDirty] = React.useState<boolean>(false);
@@ -78,18 +79,50 @@ export default function RealtimeBigDataShowcase() {
         setSeriesType(e.target.value);
     };
 
-    const changeDataStream = (modelType: string, productId: number, fMode: number) => {
-        controls?.stopStreaming();
-        setSettings({...settings, modelType, productId, fMode});
-        setIsDirty(false);
-        controls?.startStreaming();
-    }
 
+    const messageHandler = (evt: MessageEvent): any => {
+        console.log(evt);
+        
+        // Sandboxed iframes which lack the 'allow-same-origin'
+        // header have "null" rather than a valid origin. This means you still
+        // have to be careful about accepting data via the messaging API you
+        // create. Check that source, and validate those inputs!
+        if ( evt.origin === "null" ) {
+            if (evt.data.source != null &&
+                (evt.data.source as string).startsWith("react-devtools"))
+                return;
+
+            const data = (evt.data);
+            console.log(data);
+
+            switch (data.command as string) {
+                case "start":
+                    handleStartStreaming();
+                    break;
+                case "pause": // pause
+                    handleStopStreaming();
+                    break;
+                case "changeData": // change to gear chart
+                    switch (data.modelType as string) {
+                        case "gear":
+                        case "pump":
+                            changeDataStream((data.modelType as string), parseInt(data.pid), parseInt(data.fMode));
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                default:
+            }
+        }
+
+    };
     React.useEffect(() => {
         (async () => {
             const res = await drawExample((newMessages: TMessage[]) => {
                 setMessages([...newMessages]);
             }, seriesType);
+            gRes = res;
             setControls(res.controls);
             res.controls.updateSettings({
                 ...settings,
@@ -97,46 +130,32 @@ export default function RealtimeBigDataShowcase() {
                 pointsOnChart: logScale(settings.pointsOnChart),
                 pointsPerUpdate: logScale(settings.pointsPerUpdate)
             });
-            
-            const messageHandler = (evt: MessageEvent): any => {
-                console.log(evt);
-                if ((evt.data.source as string).startsWith("react-devtools"))
-                    return;
-
-                const data = JSON.parse(evt.data);
-                console.log(data);
-
-                switch (data.command as string) {
-                    case "stop": // stop
-                        controls.stopStreaming();
-                        break;
-                    case "changeData": // change to gear chart
-                        switch (data.modelType as string) {
-                            case "gear":
-                            case "pump":
-                                changeDataStream(data.modelType, data.pid, data.fMode);
-                                break;
-                            default:
-                                break;
-                        }
-                        break;
-                    default:
-                }
-
-            }
-            window.addEventListener("message", messageHandler);
-            console.log("window.addEventListender(\"message\",...) is installed.");
-
             return () => {
                 controls.stopStreaming();
                 window.removeEventListener("message", messageHandler);
                 res.sciChartSurface?.delete();
             };
         })();
+        window.addEventListener("message", messageHandler);
+        console.log("window.addEventListender(\"message\",...) is installed.");
         // set default value
         setSeriesType(ESeriesType.ColumnSeries);
     }, [seriesType]);
 
+    const changeDataStream = (modelType_: string, productId_: number, fMode_: number) => {
+        gRes.controls?.stopStreaming();
+        console.log("on changeDataStream(): %s, %d, %d", modelType_, productId_, fMode_);
+        setSettings({...settings, modelType: modelType_, productId: productId_, fMode: fMode_});
+        gRes.controls?.updateSettings({
+            modelType: modelType_,
+            productId: productId_,
+            fMode: fMode_
+        });
+        console.log(settings);
+        setIsDirty(true);
+        gRes.controls?.startStreaming();
+    };
+    
     const handleSeriesCount = (event: any, newValue: any) => {
         const seriesCount = Number(newValue);
         const newMax = Math.log10(Math.min(1000000, maxPoints / seriesCount));
@@ -184,8 +203,16 @@ export default function RealtimeBigDataShowcase() {
 
     const handleStartStreaming = () => {
         setIsDirty(false);
-        controls.startStreaming();
+        if (gRes != null && gRes != undefined)
+            gRes.controls.startStreaming();
+        else
+            controls.startStreaming();
     };
+    
+    const handleStopStreaming = () => {
+        console.log("handleStopStreaming...");
+        gRes.controls.stopStreaming();
+    }
 
     const getLogMarks = (maxPower: number) => {
         const marks: number[] = [1, 2, 5, 10];
@@ -204,7 +231,7 @@ export default function RealtimeBigDataShowcase() {
         <div className={classes.ChartWrapper}>
             <div className={localClasses.flexOuterContainer}>
                 <div id={divElementId} className={localClasses.chartArea} style={{ flexBasis: 60, flexGrow: 1, flexShrink: 1 }} />
-                <div className={classes.notificationsBlock} style={{ margin: "10 10 0 10", color: appTheme.ForegroundColor, flexBasis: 100, flexGrow: 1, flexShrink: 1 }}>
+                {/* <div className={classes.notificationsBlock} style={{ margin: "10 10 0 10", color: appTheme.ForegroundColor, flexBasis: 0, flexGrow: 1, flexShrink: 1, width:0, height:0 , display: "hidden"}}> 
                         <div>
                         <FormControl className={classes.formControl} >
                             <ButtonGroup size="medium" color="primary" aria-label="small outlined button group">
@@ -297,7 +324,7 @@ export default function RealtimeBigDataShowcase() {
                                 ))}
                             </Alert>
                         )}
-                </div>
+                </div> */}
             </div>
         </div>
     );
