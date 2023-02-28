@@ -632,16 +632,16 @@ export const drawExample = async (updateMessages: (newMessages: TMessage[]) => v
                     sciChartSurface.layoutManager.rightOuterAxesLayoutStrategy =
                         new RightAlignedOuterVerticallyStackedAxisLayoutStrategy();
                     yAxis.id = "0";
-                    yAxis.axisBorder.borderTop = 50;
-                    yAxis.axisBorder.borderBottom = 50;
+                    yAxis.axisBorder.borderTop = 1;
+                    yAxis.axisBorder.borderBottom = 1;
                 } else {
                     const yAxis = new NumericAxis(wasmContext, {
                         id: i.toString(),
                         ...axisOptions
                     });
                     sciChartSurface.yAxes.add(yAxis);
-                    yAxis.axisBorder.borderTop = 50;
-                    yAxis.axisBorder.borderBottom = 50;
+                    yAxis.axisBorder.borderTop = 1;
+                    yAxis.axisBorder.borderBottom = 1;
                 }
                 rendSeries.yAxisId = i.toString();
                 sciChartSurface.renderableSeries.add(rendSeries);
