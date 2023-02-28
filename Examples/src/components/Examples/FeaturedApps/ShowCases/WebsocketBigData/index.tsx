@@ -11,6 +11,8 @@ import * as React from "react";
 import { ESeriesType } from "scichart/types/SeriesType";
 import { appTheme } from "../../../theme";
 import { divElementId, drawExample, ISettings, TMessage, TRes, TControls } from "./drawExample";
+import { HiddenEasterEgg } from "./HiddenEasterEgg";
+import Popup from "reactjs-popup";
 
 const useStyles = makeStyles(theme => ({
     flexOuterContainer: {
@@ -73,6 +75,9 @@ export default function RealtimeBigDataShowcase() {
         stopStreaming: () => {},
         updateSettings: (newValues: ISettings) => {}
     });
+
+    const [show, setShow] = React.useState(false);
+    const [showPop, setShowPop] = React.useState(false);
 
     const changeChart = (e: any) => {
         controls?.stopStreaming();
@@ -231,6 +236,104 @@ export default function RealtimeBigDataShowcase() {
         <div className={classes.ChartWrapper}>
             <div className={localClasses.flexOuterContainer}>
                 <div id={divElementId} className={localClasses.chartArea} style={{ flexBasis: 60, flexGrow: 1, flexShrink: 1 }} />
+                <HiddenEasterEgg code={['o', 'p', 'e', 'n', 's', 'e', 's', 'a', 'm', 'e']} key="test1" resetEggMs={30000} cb={() => setShow(true)}>
+                </HiddenEasterEgg>
+                <Popup open={show} closeOnDocumentClick onClose = {() => setShow(false)}>
+                    <div className={classes.notificationsBlock} style={{ margin: "10 10 0 10", color: appTheme.ForegroundColor, flexBasis: 100, flexGrow: 1, flexShrink: 1}}> 
+                            <div>
+                            <FormControl className={classes.formControl} >
+                                <ButtonGroup size="medium" color="primary" aria-label="small outlined button group">
+                                    <Button id="startStreaming" onClick={handleStartStreaming}>
+                                        {isDirty ? "ReStart" : "Start"}
+                                    </Button>
+                                    <Button id="stopStreaming" onClick={controls.stopStreaming}>
+                                        Stop
+                                    </Button>
+                                </ButtonGroup>
+                            </FormControl>
+                            </div>
+                            <FormControl className={classes.formControl} >
+                                <RadioGroup
+                                    id="chartType"
+                                    value={seriesType}
+                                    onChange={changeChart}
+                                    defaultValue={ESeriesType.ColumnSeries}
+                                >
+                                    <FormControlLabel value={ESeriesType.ColumnSeries} control={<Radio />} label="Column Chart with Stacked Axes" />
+                                </RadioGroup>
+                            </FormControl>
+                                <Typography variant="body1">Number of Series {settings.seriesCount}</Typography>
+                                <Slider
+                                    id="seriesCount"
+                                    onChange={handleSeriesCount}
+                                    step={1}
+                                    min={1}
+                                    max={maxSettings.seriesCount}
+                                    value={settings.seriesCount}
+                                    valueLabelDisplay="off"
+                                />
+                                <Typography variant="body1">Initial Points {logScale(settings.initialPoints)}</Typography>
+                                <Slider
+                                    id="InitialPoints"
+                                    onChange={handleInitialPoints}
+                                    step={null}
+                                    min={0.1}
+                                    scale={logScale}
+                                    marks={getLogMarks(maxSettings.initialPoints)}
+                                    max={maxSettings.initialPoints}
+                                    value={settings.initialPoints}
+                                    valueLabelDisplay="off"
+                                />
+                                <Typography variant="body1">
+                                    Max Points On Chart {logScale(settings.pointsOnChart)}
+                                </Typography>
+                                <Slider
+                                    id="pointsOnChart"
+                                    onChange={handlePointsOnChart}
+                                    step={null}
+                                    min={0.1}
+                                    scale={logScale}
+                                    marks={getLogMarks(maxSettings.pointsOnChart)}
+                                    max={maxSettings.pointsOnChart}
+                                    value={settings.pointsOnChart}
+                                    valueLabelDisplay="off"
+                                />
+                                <Typography variant="body1">
+                                    Points Per Update {logScale(settings.pointsPerUpdate)}
+                                </Typography>
+                                <Slider
+                                    id="pointsPerUpdate"
+                                    onChange={handlePointsPerUpdate}
+                                    step={null}
+                                    min={0.1}
+                                    scale={logScale}
+                                    marks={getLogMarks(maxSettings.pointsPerUpdate)}
+                                    max={maxSettings.pointsPerUpdate}
+                                    value={settings.pointsPerUpdate}
+                                    valueLabelDisplay="off"
+                                />
+                                <Typography variant="body1">Send Data Interval {settings.sendEvery} ms</Typography>
+                                <Slider
+                                    id="sendEvery"
+                                    onChange={handleSendEvery}
+                                    step={1}
+                                    min={maxSettings.sendEvery}
+                                    max={500}
+                                    value={settings.sendEvery}
+                                    valueLabelDisplay="off"
+                                />
+                            {messages.length > 0 && (
+                                <Alert key="0" severity="info" className={classes.notification}>
+                                    {messages.map((msg, index) => (
+                                        <div key={index} style={{ paddingBottom: 10 }}>
+                                            <AlertTitle style={{ lineHeight: 1}}>{msg.title}</AlertTitle>
+                                            {msg.detail}
+                                        </div>
+                                    ))}
+                                </Alert>
+                            )}
+                    </div> 
+                </Popup>
                 {/* <div className={classes.notificationsBlock} style={{ margin: "10 10 0 10", color: appTheme.ForegroundColor, flexBasis: 0, flexGrow: 1, flexShrink: 1, width:0, height:0 , display: "hidden"}}> 
                         <div>
                         <FormControl className={classes.formControl} >

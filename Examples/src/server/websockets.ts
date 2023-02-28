@@ -126,6 +126,8 @@ type TSubscription = {
 function send_(socket:any, data:chartData)
 {
     console.log("in send_(): " + socket + ",,," + data);
+    if (data == null || data == undefined)
+        return;
 
     const x = data.x;
     const ys = data.ys;
@@ -193,7 +195,7 @@ export const createSocketServer = (server: http.Server): void => {
     const io = new socketIo.Server(server, { 
         serveClient: false, 
         cors: {
-            origin: ["http://localhost:8080","http://localhost:8081"],
+            origin: ["http://localhost:8080","http://localhost:8081", "http://localhost:8085"],
             methods: ["GET", "POST"]
         } 
     });
